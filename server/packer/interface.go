@@ -1,7 +1,7 @@
 package packer
 
 import (
-	"gocraft/utils/types"
+	"github.com/ffenix113/gocraft/utils/types"
 	"io"
 )
 

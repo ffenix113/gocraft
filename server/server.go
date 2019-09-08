@@ -1,13 +1,18 @@
 package server
 
 import (
-	"gocraft/server/packer"
-	"gocraft/server/version"
-	"gocraft/server/version/v404"
-	"gocraft/utils/types"
+	"fmt"
 	"log"
 	"net"
-	"runtime"
+
+	"github.com/ffenix113/gocraft/server/player"
+
+	"github.com/rs/zerolog"
+
+	"github.com/ffenix113/gocraft/server/packer"
+	"github.com/ffenix113/gocraft/server/version"
+	v404 "github.com/ffenix113/gocraft/server/version/v404"
+	"github.com/ffenix113/gocraft/utils/types"
 
 	"time"
 )
@@ -21,11 +26,12 @@ type PacketWriter struct {
 }
 
 type Server struct {
+	Logger         zerolog.Logger
 	Name           string
 	TicksPerSecond int
 	Version        version.Versioner
 	PacketWriter   PacketWriter
-	Clients        map[Player]struct{}
+	Clients        map[net.Conn]*player.Player
 	serverPackets  map[byte]version.PacketHandler
 	gamePackets    map[byte]version.PacketHandler
 }
@@ -34,14 +40,14 @@ func (s *Server) Start() {
 	s.serverPackets = map[byte]version.PacketHandler{}
 	s.gamePackets = map[byte]version.PacketHandler{}
 	s.Version = v404.NewVersion()
-	for _, packet := range s.Version.ServerPacketHandlers() {
-		s.serverPackets[packet.PackedId()] = packet.Handler
+	for pID, packet := range s.Version.ServerPacketHandlers() {
+		s.serverPackets[pID] = packet
 	}
-	for _, packet := range s.Version.GamePacketHandlers() {
-		s.gamePackets[packet.PackedId()] = packet.Handler
+	for pID, packet := range s.Version.GamePacketHandlers() {
+		s.gamePackets[pID] = packet
 	}
 	go s.AcceptNew()
-	log.Println("server started")
+	s.Logger.Info().Msg("server started")
 	s.Loop()
 }
 
@@ -55,7 +61,6 @@ func (s *Server) AcceptNew() {
 	}
 	for {
 		conn, _ := cn.Accept()
-		log.Println("new connection")
 		go s.connectNewPlayer(conn)
 	}
 
@@ -64,46 +69,55 @@ func (s *Server) AcceptNew() {
 func (s *Server) Loop() {
 	sleepTime := time.Second / time.Duration(s.TicksPerSecond)
 	for {
-		runtime.Gosched()
 		time.Sleep(sleepTime)
 	}
 }
 
 func (s *Server) connectNewPlayer(conn net.Conn) {
 	var (
-		//buf              = bytes.NewBuffer(make([]byte, 256))
-		counter          uint8
 		length, packetID types.VarInt
 	)
 	for {
-		conn.SetDeadline(time.Now().Add(10 * time.Second))
-		counter++
-		log.Println("request #", counter)
-
-		//n, _ := conn.Read(buf.Bytes())
-		//log.Printf("request: % X\n", buf.Bytes()[:n])
+		currPlayer, ok := s.Clients[conn]
+		if !ok {
+			currPlayer = &player.Player{
+				State: player.New,
+				Conn:  conn,
+			}
+			s.Clients[conn] = currPlayer
+		}
 
 		length.Read(conn)
 		packetID.Read(conn)
-		log.Printf("length: %d, packetId: %X\n", length, packetID)
-		if length.Value > maxPacketLength {
-			log.Printf("packet length is %d, which is above maximum", length)
+		s.Logger.Info().Int32("length", length.Value).Str("packet_id", fmt.Sprintf("%X", packetID.Value)).Msg("")
+		if length.Value == 0 || length.Value > maxPacketLength {
+			s.Logger.Info().Int32("length", length.Value).Msg("connection closed, zero-length")
+			delete(s.Clients, conn)
+			conn.Close()
+			break
+		}
+
+		var handler version.PacketHandler
+		switch currPlayer.State {
+		case player.InGame:
+			handler = s.gamePackets[byte(packetID.Value)]
+		default:
+			handler = s.serverPackets[byte(packetID.Value)]
+		}
+
+		if length.Value == 0 || handler == nil {
+			s.Logger.Info().Int32("packet_id", packetID.Value).Uint16("state", uint16(currPlayer.State)).Msg("unknown server packet")
+			delete(s.Clients, conn)
 			conn.Close()
 			return
 		}
-
-		if handler := s.serverPackets[byte(packetID.Value)]; length.Value != 0 && handler != nil {
-			packets, err := handler(conn)
-			if err != nil {
-				log.Print(err)
-				conn.Close()
-				return
-			}
-			s.PacketWriter.Plain.Write(conn, packets)
+		packets, err := handler(currPlayer)
+		if err != nil {
+			log.Print(err)
+			delete(s.Clients, conn)
 			conn.Close()
-			break
-		} else {
-			log.Printf("unknown server packet: %X", packetID)
+			return
 		}
+		s.PacketWriter.Plain.Write(conn, packets)
 	}
 }

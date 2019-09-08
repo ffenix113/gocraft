@@ -1,23 +1,17 @@
 package version
 
 import (
-	"gocraft/utils/types"
-	"io"
+	"github.com/ffenix113/gocraft/server/player"
+	"github.com/ffenix113/gocraft/utils/types"
 )
-
-type Commander interface {
-	PackedId() byte
-	Data() []byte
-	Handler(r io.Reader) (packets []types.Packet, err error)
-}
 
 type Versioner interface {
 	VersionName() string
 	VersionNumber() int
-	GamePacketHandlers() []Commander
-	ServerPacketHandlers() []Commander
+	GamePacketHandlers() map[byte]PacketHandler
+	ServerPacketHandlers() map[byte]PacketHandler
 	RemoveGamePacketHandlers() []byte
 	RemoveServerPacketHandlers() []byte
 }
 
-type PacketHandler func(r io.Reader) (packets []types.Packet, err error)
+type PacketHandler func(pl *player.Player) (packets []types.Packet, err error)

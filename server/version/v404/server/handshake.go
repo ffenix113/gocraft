@@ -1,12 +1,12 @@
 package server
 
 import (
-	"bytes"
-	"encoding/binary"
 	"errors"
-	"gocraft/utils/types"
-	"io"
 	"log"
+
+	"github.com/ffenix113/gocraft/server/player"
+
+	"github.com/ffenix113/gocraft/utils/types"
 )
 
 const packetId = 0x00
@@ -22,48 +22,45 @@ func (h Handshake) PackedId() byte {
 	return packetId
 }
 
-func (h Handshake) Data() []byte {
-	var buf bytes.Buffer
-	binary.Write(&buf, binary.BigEndian, h.protoVersion)
-	binary.Write(&buf, binary.BigEndian, h.address)
-	binary.Write(&buf, binary.BigEndian, h.port)
-	binary.Write(&buf, binary.BigEndian, h.nextState)
-	return buf.Bytes()
-}
-
-func (h Handshake) Handler(r io.Reader) ([]types.Packet, error) {
-	h.protoVersion.Read(r)
-	log.Println("read proto:", h.protoVersion.Value)
-	h.address.Read(r)
-	log.Println("read address:", h.address.Value)
-	h.port.Read(r)
-	log.Println("read port:", h.port.Value)
-	h.nextState.Read(r)
-	log.Println("read next state:", h.nextState.Value)
-	log.Printf("got data from handshake: %v\n", h)
+func HandshakeHandler(pl *player.Player) ([]types.Packet, error) {
+	var h Handshake
+	h.protoVersion.Read(pl.Conn)
+	h.address.Read(pl.Conn)
+	h.port.Read(pl.Conn)
+	h.nextState.Read(pl.Conn)
+	log.Printf("got data from handshake: %#v\n", h)
 
 	b := make([]byte, 2)
-	r.Read(b)
+	pl.Conn.Read(b)
 	if b[0] != 0x01 && b[1] != 0x00 {
 		log.Println("invalid next sequence: ", b)
 		return nil, errors.New("invalid handshake")
 	}
 
-	if h.nextState.Value == 2 {
-		return nil, errors.New("not implemented")
+	switch {
+	case h.nextState.Value == 1 && pl.State == player.New:
+		return ServerState(nil)
+	case h.nextState.Value == 1:
+		return PongHandshake(pl)
+	case h.nextState.Value == 2:
+		return LoginHandler(pl)
 	}
+	panic("should not be here")
+}
+
+func ServerState(_ *player.Player) ([]types.Packet, error) {
 	return []types.Packet{
 		{
 			PacketID: packetId,
 			Data: []types.Typer{
-				&types.String{`{
+				&types.String{Value: `{
     "version": {
         "name": "1.13.2",
         "protocol": 404
     },
     "players": {
-        "max": 100,
-        "online": 5,
+        "max": 4,
+        "online": 1,
         "sample": [
             {
                 "name": "thinkofdeath",
@@ -72,10 +69,25 @@ func (h Handshake) Handler(r io.Reader) ([]types.Packet, error) {
         ]
     },	
     "description": {
-        "text": "Hello world"
+        "text": "Hello from Golang!"
     },
     "favicon": ""
 }`},
+			},
+		},
+	}, nil
+}
+
+func PongHandshake(pl *player.Player) ([]types.Packet, error) {
+	pl.Conn.Read(make([]byte, 1))
+	var l types.VarLong
+	l.Read(pl.Conn)
+
+	return []types.Packet{
+		{
+			PacketID: 0x01,
+			Data: []types.Typer{
+				&l,
 			},
 		},
 	}, nil

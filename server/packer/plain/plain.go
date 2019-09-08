@@ -2,24 +2,23 @@ package plain
 
 import (
 	"bytes"
-	"gocraft/utils/types"
 	"io"
-	"log"
+
+	"github.com/ffenix113/gocraft/utils/types"
 )
 
-type Plain struct {
-}
+type Uncompressed struct{}
 
-func (p Plain) Write(w io.Writer, packets []types.Packet) error {
+func (u Uncompressed) Write(w io.Writer, packets []types.Packet) error {
 	var buf, outputBuf bytes.Buffer
 	for _, packet := range packets {
+		types.WritePacketID(&buf, packet.PacketID)
 		for _, typ := range packet.Data {
 			typ.Write(&buf)
 		}
-		(&types.VarInt{int32(buf.Len())}).Write(&outputBuf)
-		types.WritePacketID(&outputBuf, packet.PacketID)
+		(&types.VarInt{Value: int32(buf.Len())}).Write(&outputBuf)
 		outputBuf.Write(buf.Bytes())
-		log.Printf("responce: % X\n string: %s", outputBuf.Bytes(), outputBuf.String())
+		//log.Printf("response: % X\n string: %s", outputBuf.Bytes(), outputBuf.String())
 		w.Write(outputBuf.Bytes())
 	}
 	return nil

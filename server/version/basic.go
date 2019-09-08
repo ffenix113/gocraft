@@ -3,16 +3,14 @@ package version
 type Basic struct {
 	versionName   string
 	versionNumber int
-	gamePackets   []Commander
-	serverPackets []Commander
+	gamePackets   map[byte]PacketHandler
+	serverPackets map[byte]PacketHandler
 }
 
 func NewBasic(name string, number int) *Basic {
 	return &Basic{
 		versionName:   name,
 		versionNumber: number,
-		gamePackets:   []Commander{},
-		serverPackets: []Commander{},
 	}
 }
 
@@ -24,11 +22,11 @@ func (b Basic) VersionNumber() int {
 	return b.versionNumber
 }
 
-func (b Basic) GamePacketHandlers() []Commander {
+func (b Basic) GamePacketHandlers() map[byte]PacketHandler {
 	return b.gamePackets
 }
 
-func (b Basic) ServerPacketHandlers() []Commander {
+func (b Basic) ServerPacketHandlers() map[byte]PacketHandler {
 	return b.serverPackets
 }
 
